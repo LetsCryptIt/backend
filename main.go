@@ -1,34 +1,40 @@
 package main
 
 import (
-	"encoding/json"
-	"log"
-	"net/http"
+	"firebase.google.com/go/v4/auth"
 
-	"github.com/gorilla/mux"
+	"github.com/LetsCryptIt/backend/api"
+	"github.com/LetsCryptIt/backend/config"
+	"github.com/LetsCryptIt/backend/middleware"
+	"github.com/gin-gonic/gin"
 )
 
-type User struct {
-	ID       string `json:"id"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
-}
+var client *auth.Client
 
 func main() {
-	// Init
-	r := mux.NewRouter()
+	// initialize new gin engine (for server)
+	r := gin.New()
 
-	// Route Handlers
-	r.HandleFunc("/api/login", login).Methods("POST")
+	// Recovery middleware recovers from any panics and writes a 500 if there was one.
+	r.Use(gin.Recovery())
 
-	log.Fatal(http.ListenAndServe(":8000", r))
-}
+	client = config.SetupFirebase()
 
-func login(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+	r.Use(func(c *gin.Context) {
+		c.Set("firebaseAuth", client)
+	})
 
-	var user User
-	_ = json.NewDecoder(r.Body).Decode(&user)
+	// Public Api endpoints
+	r.POST("/api/login", api.Login)
 
-	json.NewEncoder(w).Encode(user)
+	authorized := r.Group("/")
+	// per group middleware! in this case we use the custom created
+	// AuthRequired() middleware just in the "authorized" group.
+	authorized.Use(middleware.AuthMiddleware)
+	{
+		authorized.GET("/api/test", api.Test)
+	}
+
+	// start the server
+	r.Run(":8000")
 }
