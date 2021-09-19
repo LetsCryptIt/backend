@@ -1,66 +1,40 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
-	"log"
-	"net/http"
-
-	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/auth"
 
-	"github.com/gorilla/mux"
+	"github.com/LetsCryptIt/backend/api"
+	"github.com/LetsCryptIt/backend/config"
+	"github.com/LetsCryptIt/backend/middleware"
+	"github.com/gin-gonic/gin"
 )
 
-type User struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
-}
-
-var app *firebase.App
-var err error
 var client *auth.Client
 
 func main() {
-	// Init
-	r := mux.NewRouter()
+	// initialize new gin engine (for server)
+	r := gin.New()
 
-	app, err = firebase.NewApp(context.Background(), nil)
-	if err != nil {
-		log.Fatalf("error initializing app: %v\n", err)
+	// Recovery middleware recovers from any panics and writes a 500 if there was one.
+	r.Use(gin.Recovery())
+
+	client = config.SetupFirebase()
+
+	r.Use(func(c *gin.Context) {
+		c.Set("firebaseAuth", client)
+	})
+
+	// Public Api endpoints
+	r.POST("/api/login", api.Login)
+
+	authorized := r.Group("/")
+	// per group middleware! in this case we use the custom created
+	// AuthRequired() middleware just in the "authorized" group.
+	authorized.Use(middleware.AuthMiddleware)
+	{
+		authorized.GET("/api/test", api.Test)
 	}
 
-	// Get an auth client from the firebase.App
-	client, err = app.Auth(context.Background())
-	if err != nil {
-		log.Fatalf("error getting Auth client: %v\n", err)
-	}
-
-	// Route Handlers
-	r.HandleFunc("/api/login", login).Methods("POST")
-
-	log.Fatal(http.ListenAndServe(":8000", r))
-}
-
-func login(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	var user User
-	_ = json.NewDecoder(r.Body).Decode(&user)
-
-	params := (&auth.UserToCreate{}).
-		Email(user.Email).
-		EmailVerified(false).
-		Password(user.Password).
-		DisplayName(user.Name)
-
-	u, err := client.CreateUser(r.Context(), params)
-	if err != nil {
-		log.Fatalf("error creating user: %v\n", err)
-	}
-	log.Printf("Successfully created user: %v\n", u)
-
-	json.NewEncoder(w).Encode(u)
+	// start the server
+	r.Run(":8000")
 }
